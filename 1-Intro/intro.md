@@ -1,4 +1,15 @@
+---
+authors:
+  - Raphael Amorim
+tags:
+  - reproducibility
+  - benchmarking
+  - sparkarena
+---
+
 # Introducing Spark Arena: A Community-Driven LLM Performance Leaderboard
+
+![Spark Arena logo](/posts/1-intro/img/spark-arena-logo.svg)
 
 ## The Problem: Reproducibility in the Wild
 

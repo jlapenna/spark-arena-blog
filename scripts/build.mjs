@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -408,6 +409,8 @@ function pageTemplate({ title, description, content, isPost = false }) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(title)} | Spark Arena Tech Blog</title>
   <meta name="description" content="${escapeHtml(description)}" />
+  <link rel="alternate" type="application/atom+xml" title="Spark Arena Tech Blog" href="/atom.xml" />
+  <link rel="alternate" type="application/atom+xml" title="Spark Arena Raw Benchmarks" href="/benchmarks.xml" />
   <style>
     :root {
       --bg: #050606;
@@ -674,6 +677,8 @@ function pageTemplate({ title, description, content, isPost = false }) {
       <h1 class="logo"><a href="/"><span>Spark Arena</span> Tech Blog</a></h1>
       <div class="nav-links">
         ${backLink}
+        <a class="pill" href="/atom.xml">Blog Feed</a>
+        <a class="pill" href="/benchmarks.xml">Raw Feed</a>
         <a class="pill" href="https://spark-arena.com/leaderboard">Leaderboard</a>
       </div>
     </div>
@@ -769,6 +774,9 @@ async function main() {
       // No image directory for this post
     }
 
+    const stats = await fs.stat(absPath);
+    const updatedAt = stats.mtime.toISOString();
+
     posts.push({
       title,
       excerpt,
@@ -778,6 +786,7 @@ async function main() {
       key,
       authors,
       tags,
+      updatedAt,
     });
   }
 
@@ -788,6 +797,80 @@ async function main() {
     if (ai !== bi) return ai - bi;
     return a.source.localeCompare(b.source);
   });
+
+  // Generate Atom Feed
+  const siteUrl = "https://spark-arena.com";
+  const feedUrl = `${siteUrl}/atom.xml`;
+  const blogUrl = `${siteUrl}/`; // The blog is the root of the site in this setup
+
+  const feedEntries = posts.map((post) => {
+    const postUrl = `${siteUrl}${post.routePath}`;
+    const authorsXml = post.authors.map(a => `    <author><name>${escapeHtml(a)}</name></author>`).join("\n");
+    const tagsXml = post.tags.map(t => `    <category term="${escapeHtml(t)}" />`).join("\n");
+    
+    return `  <entry>
+    <title>${escapeHtml(post.title)}</title>
+    <link href="${postUrl}" />
+    <id>${postUrl}</id>
+    <updated>${post.updatedAt}</updated>
+    <summary>${escapeHtml(post.excerpt)}</summary>
+${authorsXml}
+${tagsXml}
+  </entry>`;
+  }).join("\n");
+
+  const atomXml = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Spark Arena Tech Blog</title>
+  <subtitle>Spark Arena engineering notes, benchmarking deep dives, and practical runbooks.</subtitle>
+  <link href="${feedUrl}" rel="self" />
+  <link href="${blogUrl}" />
+  <id>${blogUrl}</id>
+  <updated>${new Date().toISOString()}</updated>
+${feedEntries}
+</feed>`;
+
+  await fs.writeFile(path.join(DIST_DIR, "atom.xml"), atomXml, "utf8");
+
+  // Generate Benchmarks Feed from recipe-registry
+  try {
+    console.log("Fetching benchmarks from recipe-registry...");
+    const commitsJson = execSync("gh api repos/spark-arena/recipe-registry/commits").toString();
+    const commits = JSON.parse(commitsJson).slice(0, 15);
+
+    const benchmarkEntries = commits.map((c) => {
+      const commitUrl = c.html_url;
+      const authorName = c.commit.author.name;
+      const date = c.commit.author.date;
+      const message = c.commit.message;
+
+      return `  <entry>
+    <title>${escapeHtml(message.split("\n")[0])}</title>
+    <link href="${commitUrl}" />
+    <id>${commitUrl}</id>
+    <updated>${date}</updated>
+    <summary>${escapeHtml(message)}</summary>
+    <author><name>${escapeHtml(authorName)}</name></author>
+    <category term="recipe-update" />
+  </entry>`;
+    }).join("\n");
+
+    const benchmarksXml = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Spark Arena Raw Benchmarks</title>
+  <subtitle>Raw benchmark recipes and registry updates from spark-arena/recipe-registry.</subtitle>
+  <link href="${siteUrl}/benchmarks.xml" rel="self" />
+  <link href="https://github.com/spark-arena/recipe-registry" />
+  <id>https://github.com/spark-arena/recipe-registry</id>
+  <updated>${new Date().toISOString()}</updated>
+${benchmarkEntries}
+</feed>`;
+
+    await fs.writeFile(path.join(DIST_DIR, "benchmarks.xml"), benchmarksXml, "utf8");
+    console.log("Generated benchmarks.xml");
+  } catch (err) {
+    console.error("Failed to generate benchmarks feed:", err.message);
+  }
 
   const storiesHtml = posts
     .map((post) => {
